@@ -10,6 +10,7 @@ A Claude Code skill that keeps the [OpenSpec](https://github.com/Fission-AI/Open
 - **Updates only what is stale**: compares each repo's `generatedBy` stamp with `openspec --version` and runs `openspec update` where they differ.
 - **Commits only the tooling**: stages the generated files and nothing else, so unrelated work in progress is never swept into the commit.
 - **Handles the move to CLI 2.0**: a repo still on 1.x loses its `.claude/commands/opsx/` slash commands and gains the linked skill layout in one commit.
+- **Checks the branch before it commits**: it remembers the branch each repo's tooling was committed on and asks first when a repo is on a different one, so a refresh never lands on a branch you left checked out by accident. It also offers any linked worktree your folders do not cover.
 - **Lists what still names a removed command**: after an update that drops or renames a workflow, it reports the files in each repo that still mention the old name, and leaves them for you to reword.
 - **Reports drift by name**: repos that are new since the last run, repos that are gone, and folders that are missing (an unplugged drive is not treated as deleted repos).
 - **Notices repos outside your folders**: run it from inside a repo it does not know about and it offers to add that folder.

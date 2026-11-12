@@ -37,6 +37,11 @@ one absolute path per line, `#` comments allowed; the user may edit it by hand:
 [skipped]      # roots the user declined; never asked about again
 ```
 
+A `[synced]` line also carries the branch the root's tooling was last committed on:
+`<path> | <branch>`, with `(detached)` for a detached HEAD and no ` | ` part for a root
+that is not a git repo. It is the baseline for the branch check in step 5. A line with no
+branch (one added by hand, say) gets its branch recorded at the next run.
+
 Store paths as `find` prints them, but **never compare paths as strings**: one folder can
 print several ways (`C:/x` from git, `/c/x` from find, a mount alias such as `/tmp/...` from
 `pwd`, a different letter case). Match by identity with bash's `[ "$a" -ef "$b" ]` (same
@@ -107,6 +112,26 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
      from step 4, plus a flag for a path inside a cloud-sync folder (OneDrive, Dropbox,
      iCloud, Google Drive: likely a copy of a repo that lives elsewhere). Ask once which
      to sync; the declined ones go to `[skipped]`.
+   - **Branch:** the tooling commit lands on whatever branch the root has checked out, so
+     read it before anything is updated: `git -C <root> branch --show-current` (empty
+     output is a detached HEAD; a nested folder has its parent repo's branch). A root that
+     is due a commit (stale, or needing the ignore rule) is **asked about first** when:
+     - its branch differs from the one recorded in `[synced]`,
+     - HEAD is detached, or
+     - it has no recorded branch and is on `main` or `master` while a branch named `dev`,
+       `develop` or `development` exists.
+
+     The choices: **commit on the current branch** (it becomes the recorded one) or
+     **skip this run** (no update, no commit; the recorded branch is kept and the root is
+     flagged in the report). Never switch the branch yourself: a checkout rewrites the
+     user's working tree. A root that is current gets no question: report the branch
+     change and keep the recorded branch, so the question comes when a commit is next due.
+   - **Worktrees:** `git -C <root> worktree list --porcelain` for each synced root. A
+     linked worktree that holds `openspec/`, was not found by the scan and is not in
+     `[skipped]` is a checkout the sync never reaches: its branch keeps the old tooling
+     while the scanned checkout takes every refresh on its own branch. Offer it once,
+     naming its branch: **add its folder** to `[folders]`, or **leave it out**
+     (`[skipped]`).
 
 6. **Per repo: skip if current.** Read `generatedBy` from
    `.claude/skills/openspec-apply-change/SKILL.md` (a real file in 1.x, a link into
@@ -120,7 +145,8 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
    commit; note "links repaired" in the report.
 
 7. **Per stale repo, update and then commit only the tooling.**
-   - Run `openspec update` in the root.
+   - Only where the branch check of step 5 passed or the user chose to commit there. Run
+     `openspec update` in the root.
    - If `.claude/settings.local.json` exists and `git check-ignore` does not ignore it, add
      the ignore rule to `.gitignore` first (in a current repo too: commit just that rule).
    - **Stage only the generated paths**: `git add -A --` on `.claude/commands/opsx`,
@@ -148,12 +174,15 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
      was written with; a dead permission entry is harmless.
 
 8. **Save state.** `[folders]` gains any folder added in step 2; `[synced]` becomes the
-   roots synced or current this run, plus any under a missing folder; `[skipped]` gains
-   the declined ones. Edit the sections in place and keep the user's comments.
+   roots synced or current this run, plus any under a missing folder, each with its
+   branch: the branch committed on, or checked and unchanged; the previously recorded one
+   for a root skipped at the branch check or current on a changed branch. `[skipped]`
+   gains the declined ones. Edit the sections in place and keep the user's comments.
 
 9. **Report.** First line: the folders scanned (and any missing), so a gap in scope is
-   visible. Then one table: repo, old -> new version (or "current"), skills count, commit
-   hash ("-" when none), notes. Then the new, gone, skipped, not-a-root, and
+   visible. Then one table: repo, branch, old -> new version (or "current"), skills
+   count, commit hash ("-" when none), notes. Then every branch change (recorded ->
+   current, and what was chosen) and every worktree offered. Then the new, gone, skipped, not-a-root, and
    no-Claude-tooling lines. The last two are recomputed each run and never stored: they
    cost one line and would hide a change if silenced. Last, when a verb was removed or
    renamed: the files that still name it (step 7), per repo, living documents apart from
