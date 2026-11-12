@@ -1,12 +1,16 @@
 ---
 name: sync-opsx
-description: Sync the generated OpenSpec tooling (.claude opsx commands + openspec-* skills) across every openspec-enabled repo on this machine. Use after upgrading the openspec CLI, when a repo's opsx skills lag `openspec --version` (check the `generatedBy` frontmatter), or when asked to "sync opsx" / "refresh openspec tooling".
+description: Sync the generated OpenSpec tooling (the openspec-* skills, plus the .claude opsx commands of CLI 1.x) across every openspec-enabled repo on this machine. Use after upgrading the openspec CLI, when a repo's opsx skills lag `openspec --version` (check the `generatedBy` frontmatter), or when asked to "sync opsx" / "refresh openspec tooling".
 ---
 
 # sync-opsx: refresh generated OpenSpec tooling machine-wide
 
-The openspec CLI **generates** `.claude/commands/opsx/*` and `.claude/skills/openspec-*/`
-into each repo it is initialized in (`generatedBy` frontmatter records the CLI version).
+The openspec CLI **generates** its skills into each repo it is initialized in
+(`generatedBy` frontmatter records the CLI version). From CLI 2.0 the skill bodies live in
+`.agents/skills/openspec-*/` (one shared copy, plus a `.openspec-target` marker) and each
+`.claude/skills/openspec-*` is a **symlink** to its body; there are no slash commands. CLI
+1.x generated real `.claude/skills/openspec-*/` folders plus `.claude/commands/opsx/*`, and
+`openspec update` to 2.0 deletes the commands and converts the folders to links.
 Repos drift silently: `openspec update` only runs where it is invoked, so a CLI upgrade
 leaves every other repo on the old generation. This skill finds them all and updates the
 stale ones.
@@ -15,7 +19,8 @@ stale ones.
 
 **Convention:** the generated set is *vendored and tracked* per repo, never hoisted to
 `~/.claude/skills`, because `openspec update` regenerates repo-local copies that would
-shadow the global ones. Tracked: `.claude/commands/`, `.claude/skills/`,
+shadow the global ones. Tracked: `.agents/skills/`, `.claude/skills/` (the links commit
+as symlink entries, mode 120000), `.claude/commands/` where one remains,
 `.claude/settings.json`. Ignored: `.claude/settings.local.json` (machine-local permission
 accretion), via a repo `.gitignore` rule. If the user does not track `.claude/` in their
 repos, ask before the first commit and follow their answer.
@@ -104,19 +109,32 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
      to sync; the declined ones go to `[skipped]`.
 
 6. **Per repo: skip if current.** Read `generatedBy` from
-   `.claude/skills/openspec-apply-change/SKILL.md`. Equal to the CLI version means
-   "current". Never pass `--force` (the CLI refuses on a current repo, correctly).
+   `.claude/skills/openspec-apply-change/SKILL.md` (a real file in 1.x, a link into
+   `.agents/skills/` from 2.0, so the one path reads both). Equal to the CLI version means
+   "current". Never pass `--force` (the CLI refuses on a current repo, correctly). Record
+   the old version **before** updating, or read it afterwards from
+   `git show HEAD:./.claude/skills/openspec-apply-change/SKILL.md`: once the update has
+   run, the link resolves to the new body. A stamp that cannot be read where the set
+   exists (the link is a text stub, see **Symlinks**) counts as stale: `openspec update`
+   repairs the links without `--force`. If nothing is staged afterwards, there is no
+   commit; note "links repaired" in the report.
 
 7. **Per stale repo, update and then commit only the tooling.**
    - Run `openspec update` in the root.
    - If `.claude/settings.local.json` exists and `git check-ignore` does not ignore it, add
      the ignore rule to `.gitignore` first (in a current repo too: commit just that rule).
-   - **Stage only** `.claude/` (plus `.gitignore` when edited). Never sweep unrelated dirty
-     files into the commit. A nested folder (step 4) gets its own commit in the parent repo.
+   - **Stage only the generated paths**: `git add -A --` on `.claude/commands/opsx`,
+     `.agents/skills`, and each `.claude/skills/openspec-*` by name (plus `.gitignore` when
+     edited). Not the whole of `.claude/`: hand-authored skills there may be dirty. Never
+     sweep unrelated dirty files into the commit. Before committing, check that nothing
+     outside those paths is staged. A nested folder (step 4) is committed in its parent
+     repo, its paths carrying its prefix: in the parent's own tooling commit when the
+     parent is refreshed in the same run, otherwise in a commit of its own.
    - Commit message: `chore(tooling): opsx skill refresh at CLI <ver>`, with a body
-     noting old -> new version, verbs added or removed (compare `ls .claude/commands/opsx`
-     before and after), and what changed beyond the version stamp (`git diff --cached --stat`
-     plus a skim of any file whose diff is more than the `generatedBy` line).
+     noting old -> new version, verbs added or removed (compare the `openspec-*` names
+     under `.claude/skills`, and `.claude/commands/opsx` while it exists, before and
+     after), and what changed beyond the version stamp (diff each old body from `HEAD`
+     against the new one, ignoring the `generatedBy` line).
 
 8. **Save state.** `[folders]` gains any folder added in step 2; `[synced]` becomes the
    roots synced or current this run, plus any under a missing folder; `[skipped]` gains
@@ -133,10 +151,21 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
 - **`.claude/` wholly ignored:** a blanket rule usually predates the convention: narrow it
   to `.claude/settings.local.json` and track the tooling, quoting the old rule in the commit
   body. If the ignore comment suggests a deliberate policy, ask instead of changing it.
-- **First-time tracking:** add the `settings.local.json` ignore rule *before*
-  `git add .claude`, or the permission file lands in history.
-- **Repo-specific skills are sacred:** only `commands/opsx/*` and `skills/openspec-*` are
-  generated. Anything else under `.claude/` is hand-authored. Never delete, regenerate, or
+- **First-time tracking:** add the `settings.local.json` ignore rule *before* staging
+  anything under `.claude/`, or the permission file lands in history.
+- **Symlinks:** the CLI creates the `.claude/skills/openspec-*` links itself (on Windows
+  that needs Developer Mode or the symlink privilege). Git records them as mode 120000
+  whatever `core.symlinks` says, and a clone made where symlinks work checks them out as
+  real links. In a repo whose effective `core.symlinks` is `false` (often a local setting
+  left by an old `git init`; check with `git config --show-origin core.symlinks`), any
+  git operation that rewrites those paths (a branch switch, a restore, a stash) writes
+  each as a small text file holding the target path, and the agent then finds no skill
+  there. `openspec update` repairs such stubs, in a current repo too. Report every synced
+  repo with symlinks off; changing the setting is the user's call. Do not replace the
+  links with copies: the next `openspec update` converts them back.
+- **Repo-specific skills are sacred:** only `.claude/commands/opsx/*`,
+  `.claude/skills/openspec-*` and `.agents/skills/openspec-*` (with its `.openspec-target`)
+  are generated. Anything else under `.claude/` is hand-authored. Never delete, regenerate, or
   "sync" it.
 - **CRLF warnings:** repos with `core.autocrlf` normalize on add, so the warnings are
   cosmetic. Do not "fix" line endings.
@@ -145,6 +174,7 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
 
 ## Verify
 
-Every synced repo reports the same `generatedBy`; `diff -rq` between any two repos'
-generated sets is empty (ignoring repo-specific extras); every touched tree is clean
-afterwards.
+Every synced repo reports the same `generatedBy`; `diff -rq --strip-trailing-cr` between
+any two repos' `.agents/skills` is empty (ignoring repo-specific extras); every
+`.claude/skills/openspec-*/SKILL.md` is readable through its link; every touched tree is
+clean afterwards.
