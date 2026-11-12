@@ -135,6 +135,17 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
      under `.claude/skills`, and `.claude/commands/opsx` while it exists, before and
      after), and what changed beyond the version stamp (diff each old body from `HEAD`
      against the new one, ignoring the `generatedBy` line).
+   - **When a verb was removed or renamed, find what still names it.** Search the repo's
+     tracked files, outside the generated paths, for each old name (a removed
+     `/opsx:<verb>` command, a renamed skill, the path `.claude/commands/opsx`):
+     ```bash
+     git grep -lE '/opsx:|commands/opsx' -- . ':!.agents' ':!.claude/skills/openspec-*'
+     ```
+     and `.claude/settings.local.json`, which is untracked, for permission entries that
+     name it (`Skill(opsx:<verb>)`). Report the hits and change nothing. A living document
+     (a router, a reference doc, a spec) needs its owner's wording and sometimes the repo's
+     own change process; a dated record (a journal, an archived change) keeps the names it
+     was written with; a dead permission entry is harmless.
 
 8. **Save state.** `[folders]` gains any folder added in step 2; `[synced]` becomes the
    roots synced or current this run, plus any under a missing folder; `[skipped]` gains
@@ -144,7 +155,9 @@ d="$top"; while :; do [ "$d" -ef "$folder" ] && break; p=$(dirname "$d"); [ "$p"
    visible. Then one table: repo, old -> new version (or "current"), skills count, commit
    hash ("-" when none), notes. Then the new, gone, skipped, not-a-root, and
    no-Claude-tooling lines. The last two are recomputed each run and never stored: they
-   cost one line and would hide a change if silenced.
+   cost one line and would hide a change if silenced. Last, when a verb was removed or
+   renamed: the files that still name it (step 7), per repo, living documents apart from
+   dated records.
 
 ## Handling rules
 
